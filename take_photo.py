@@ -75,4 +75,37 @@ def main():
   timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
   focus_tag = (
       f'lens_{args.focus}'
-      if args.focus is
+      if args.focus is not None
+      else f'af_{args.af}'
+      if args.af
+      else 'default'
+  )
+  label_tag = f'_{args.name}' if args.name else ''
+  filename = f'moth_{timestamp}_{focus_tag}{label_tag}.jpg'
+  filepath = os.path.join(usb_path, filename)
+
+  # Build camera command
+  cmd = ['rpicam-still', '-t', str(args.timeout), '-o', filepath]
+
+  if args.focus is not None:
+    cmd.extend(['--lens-position', str(args.focus)])
+  elif args.af is not None:
+    cmd.extend(['--autofocus-mode', args.af])
+
+  if args.shutter is not None:
+    cmd.extend(['--shutter', str(args.shutter)])
+
+  print(f'Running command: {" ".join(cmd)}')
+  try:
+    subprocess.run(cmd, check=True)
+    # Ensure USB cache is flushed so image writes safely
+    subprocess.run(['sync'])
+    print(f'Success! Photo saved to: {filepath}')
+  except subprocess.CalledProcessError as e:
+    print(f'Capture failed with exit code: {e.returncode}')
+  except FileNotFoundError:
+    print('rpicam-still command not found.')
+
+
+if __name__ == '__main__':
+  main()
