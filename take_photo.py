@@ -4,29 +4,19 @@ from datetime import datetime
 
 def find_usb_drive():
     """Finds the mount point of a connected USB drive on Raspberry Pi."""
-    # Pi OS auto-mounts USBs under /media/<username>/<usb_name>
-    media_dir = "/media"
+    # Based on your df output, your drive mounts directly here
+    usb_path = "/media/sda1"
     
-    if os.path.exists(media_dir):
-        # Look through user directories in /media (e.g., /media/pi or /media/mothbox)
-        users = os.listdir(media_dir)
-        for user in users:
-            user_path = os.path.join(media_dir, user)
-            if os.path.isdir(user_path):
-                drives = os.listdir(user_path)
-                if drives:
-                    # Return the path to the first USB drive found
-                    return os.path.join(user_path, drives[0])
-                    
-    return None
+    if os.path.exists(usb_path):
+        return usb_path
+    return "." # Fallback to current directory if USB is unplugged
 
 def take_photo():
     print("Searching for connected USB drive...")
     usb_path = find_usb_drive()
     
-    if not usb_path:
-        print("Error: No USB drive found in /media/. Saving to current directory instead.")
-        usb_path = "." 
+    if usb_path == ".":
+        print("Warning: /media/sda1 not found. Saving to current directory instead.")
     else:
         print(f"USB drive found at: {usb_path}")
 
@@ -37,25 +27,31 @@ def take_photo():
     
     print(f"Warming up camera and capturing to: {filepath}")
     
-    # libcamera-still is the standard command for modern Pi OS
-    # -t 1500 gives the sensor 1.5 seconds to adjust focus and auto-exposure
-    # --autofocus is useful if you are using an Arducam or Pi Cam v3 with AF
-    command = ["libcamera-still", "-t", "1500", "--autofocus", "-o", filepath]
+    # List of camera commands to try (Newest OS -> Older OS -> Oldest OS)
+    commands_to_try = [
+        ["rpicam-still", "-t", "1500", "--autofocus", "-o", filepath],
+        ["libcamera-still", "-t", "1500", "--autofocus", "-o", filepath],
+        ["raspistill", "-t", "1500", "-o", filepath]
+    ]
     
-    try:
-        subprocess.run(command, check=True)
-        print(f"Success! Photo saved as {filename}")
-    except subprocess.CalledProcessError:
-        print("\nFailed with libcamera. Falling back to legacy raspistill...")
-        # Fallback for older Raspberry Pi OS versions (Buster and older)
+    success = False
+    for cmd in commands_to_try:
         try:
-            legacy_cmd = ["raspistill", "-t", "1500", "-o", filepath]
-            subprocess.run(legacy_cmd, check=True)
-            print(f"Success! Photo saved as {filename}")
-        except Exception as e:
-            print(f"Failed to capture photo: {e}")
-    except FileNotFoundError:
-        print("Camera commands not found. Is the camera enabled in raspi-config?")
+            # Hide the massive amount of terminal text the camera command usually prints
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"Success! Photo saved as {filename} using {cmd[0]}")
+            success = True
+            break
+        except FileNotFoundError:
+            # Command doesn't exist on this OS version, try the next one
+            continue
+        except subprocess.CalledProcessError:
+            print(f"\nError: {cmd[0]} crashed. Is the ribbon cable connected securely?")
+            success = True # We found the command, but it failed. Stop trying.
+            break
+
+    if not success:
+        print("\nFailed: No camera commands found. Is the camera enabled?")
 
 if __name__ == "__main__":
     take_photo()
