@@ -29,8 +29,8 @@ def take_photo():
     
     # List of camera commands to try (Newest OS -> Older OS -> Oldest OS)
     commands_to_try = [
-        ["rpicam-still", "-t", "1500", "-o", filepath],
-        ["libcamera-still", "-t", "1500", "-o", filepath],
+        ["rpicam-still", "-t", "3000", "--autofocus-mode", "auto", "-o", filepath],
+        ["libcamera-still", "-t", "3000", "--autofocus-mode", "auto", "-o", filepath],
         ["raspistill", "-t", "1500", "-o", filepath]
     ]
     
