@@ -8,10 +8,10 @@ import supervision as sv
 from inference import get_model
 
 # Ensure weights persist across reboots in offline field conditions
-os.environ.setdefault("MODEL_CACHE_DIR", "/home/pi/models")
+os.environ.setdefault("MODEL_CACHE_DIR", "models")
 
-DEFAULT_MODEL_ID = "bugbytes-cacheusifyoucan-d0auc/4"
-DEFAULT_API_KEY = "YOUR_ROBOFLOW_API_KEY"  # Or export ROBOFLOW_API_KEY in shell
+DEFAULT_MODEL_ID = "bugbytes-cacheusifyoucan-d0auc-4-rfdetr-nas-pecoret-t1--454bec"
+DEFAULT_API_KEY = "PnGAc41GMUzYTZuCPvVW"  # Or export ROBOFLOW_API_KEY in shell
 
 
 def parse_args():
@@ -21,7 +21,7 @@ def parse_args():
     parser.add_argument(
         "image",
         type=str,
-        help="Path to the captured image file (e.g. /home/pi/Desktop/Mothbox/capture.jpg)",
+        help="Path to the captured image file (e.g. inference_images/capture.jpg)",
     )
     parser.add_argument(
         "--conf",
