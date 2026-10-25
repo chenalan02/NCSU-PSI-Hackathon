@@ -10,7 +10,8 @@ from inference import get_model
 # Ensure weights persist across reboots in offline field conditions
 os.environ.setdefault("MODEL_CACHE_DIR", "models")
 
-DEFAULT_MODEL_ID = "bugbytes-cacheusifyoucan-d0auc-4-rfdetr-nas-pecoret-t1--454bec"
+# DEFAULT_MODEL_ID = "bugbytes-cacheusifyoucan-d0auc-4-rfdetr-nas-pecoret-t1--454bec"
+DEFAULT_MODEL_ID = "bugbytes-cacheusifyoucan-d0auc/4"
 DEFAULT_API_KEY = "PnGAc41GMUzYTZuCPvVW"  # Or export ROBOFLOW_API_KEY in shell
 
 
