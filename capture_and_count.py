@@ -121,7 +121,7 @@ def main():
     # Re-introduce the slicer to handle the 9K resolution properly
     slicer = sv.InferenceSlicer(
         slice_wh=(slice_w, slice_h),
-        overlap_ratio_wh=(0.15, 0.15),
+        overlap_wh=(int(slice_w * 0.15), int(slice_h * 0.15)),
         iou_threshold=0.5,
         callback=slice_callback,
     )
