@@ -5,6 +5,10 @@ import subprocess
 import sys
 from datetime import datetime
 from collections import Counter
+import numpy as np
+import cv2
+import supervision as sv
+from inference_sdk import InferenceHTTPClient, InferenceConfiguration
 
 # Suppress verbose Roboflow warnings before loading inference
 os.environ["CORE_MODEL_GAZE_ENABLED"] = "False"
@@ -13,12 +17,9 @@ os.environ["CORE_MODEL_SAM3_ENABLED"] = "False"
 os.environ["CORE_MODEL_YOLO_WORLD_ENABLED"] = "False"
 os.environ.setdefault("MODEL_CACHE_DIR", "models")
 
-import cv2
-import supervision as sv
-from inference import get_model
-
-DEFAULT_MODEL_ID = "bugbytes-cacheusifyoucan-d0auc-4-rfdetr-nas-pecoret-t1--454bec"
 DEFAULT_API_KEY = "PnGAc41GMUzYTZuCPvVW"
+WORKSPACE_NAME = "bugbytes"
+WORKFLOW_ID = "bugbytes-cacheusifyoucan-vbugbytes-cacheusifyoucan-d0auc-4-rfdetr-nas-pecoret-t1-454bec-logic"
 
 def find_usb_drive():
     """Finds the mount point of a connected USB drive on Raspberry Pi."""
@@ -28,9 +29,9 @@ def find_usb_drive():
     return '.'  # Fallback to current directory if USB is unplugged
 
 def main():
-    parser = argparse.ArgumentParser(description='Capture and count insects.')
+    parser = argparse.ArgumentParser(description='Capture and count insects using local Roboflow Docker server.')
 
-    # Camera controls (from your original script)
+    # Camera controls
     parser.add_argument('-f', '--focus', type=str, default=None, help='Manual lens position in diopters')
     parser.add_argument('--af', type=str, choices=['auto', 'continuous', 'manual'], default=None, help="Autofocus mode")
     parser.add_argument('-t', '--timeout', type=int, default=2000, help='Warm-up time (ms)')
@@ -39,7 +40,6 @@ def main():
 
     # Inference controls
     parser.add_argument('--conf', type=float, default=0.40, help='Confidence threshold')
-    parser.add_argument('--model-id', type=str, default=os.getenv("ROBOFLOW_MODEL_ID", DEFAULT_MODEL_ID))
     parser.add_argument('--api-key', type=str, default=os.getenv("ROBOFLOW_API_KEY", DEFAULT_API_KEY))
     parser.add_argument('--include-other', action='store_true', help="Include 'other' class")
 
@@ -88,13 +88,65 @@ def main():
         print(f"Error: Could not decode image -> {filepath}", file=sys.stderr)
         sys.exit(1)
 
-    print("Loading model and running 4x4 sliced inference...")
-    model = get_model(model_id=args.model_id, api_key=args.api_key)
+    print("Connecting to local Docker inference server (http://localhost:9001)...")
+    
+    # Initialize the client pointed at your local container
+    client = InferenceHTTPClient(
+        api_url="http://localhost:9001",
+        api_key=args.api_key
+    ).configure(InferenceConfiguration(api_key_transport="header"))
 
-    def slice_callback(image_slice):
-        results = model.infer(image_slice)[0]
-        return sv.Detections.from_inference(results)
+    def slice_callback(image_slice: np.ndarray) -> sv.Detections:
+        """Sends a sliced tile to the local inference server and parses the Workflow response."""
+        try:
+            # inference_sdk automatically encodes the numpy array slice to send to the local server
+            result = client.run_workflow(
+                workspace_name=WORKSPACE_NAME,
+                workflow_id=WORKFLOW_ID,
+                images={"image": image_slice},
+                use_cache=True
+            )
+            
+            # Workflow output structure is deeply nested. Extract the predictions array.
+            result_dict = result[0] if isinstance(result, list) else result
+            preds = []
+            
+            # Search the workflow block outputs for the predictions list
+            if "predictions" in result_dict:
+                preds = result_dict["predictions"]
+            else:
+                for val in result_dict.values():
+                    if isinstance(val, dict) and "predictions" in val:
+                        preds = val["predictions"]
+                        break
+                    elif isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict) and "x" in val[0]:
+                        preds = val
+                        break
 
+            # Convert JSON predictions back to Supervision Detections format
+            xyxy, confidence, class_id, class_name = [], [], [], []
+            for p in preds:
+                cx, cy, w, h = p['x'], p['y'], p['width'], p['height']
+                xyxy.append([cx - w/2, cy - h/2, cx + w/2, cy + h/2])
+                confidence.append(p.get('confidence', 1.0))
+                class_id.append(p.get('class_id', 0))
+                class_name.append(p.get('class', 'unknown'))
+
+            if not xyxy:
+                return sv.Detections.empty()
+
+            return sv.Detections(
+                xyxy=np.array(xyxy),
+                confidence=np.array(confidence),
+                class_id=np.array(class_id),
+                data={"class_name": np.array(class_name)}
+            )
+
+        except Exception as e:
+            print(f"Slice inference failed: {e}", file=sys.stderr)
+            return sv.Detections.empty()
+
+    print("Running 4x4 sliced inference...")
     h, w = image.shape[:2]
     slice_w = max(640, int(w / 4))
     slice_h = max(640, int(h / 4))
