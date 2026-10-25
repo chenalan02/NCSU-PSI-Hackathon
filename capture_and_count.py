@@ -122,7 +122,7 @@ def main():
     slicer = sv.InferenceSlicer(
         slice_wh=(slice_w, slice_h),
         overlap_wh=(int(slice_w * 0.15), int(slice_h * 0.15)),
-        iou_threshold=0.25,
+        iou_threshold=0.35,
         callback=slice_callback,
     )
 
