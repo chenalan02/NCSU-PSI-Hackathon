@@ -5,17 +5,7 @@ import subprocess
 import sys
 from datetime import datetime
 from collections import Counter
-import numpy as np
-import cv2
-import supervision as sv
 from inference_sdk import InferenceHTTPClient, InferenceConfiguration
-
-# Suppress verbose Roboflow warnings before loading inference
-os.environ["CORE_MODEL_GAZE_ENABLED"] = "False"
-os.environ["CORE_MODEL_SAM_ENABLED"] = "False"
-os.environ["CORE_MODEL_SAM3_ENABLED"] = "False"
-os.environ["CORE_MODEL_YOLO_WORLD_ENABLED"] = "False"
-os.environ.setdefault("MODEL_CACHE_DIR", "models")
 
 DEFAULT_API_KEY = "PnGAc41GMUzYTZuCPvVW"
 WORKSPACE_NAME = "bugbytes"
@@ -29,7 +19,7 @@ def find_usb_drive():
     return '.'  # Fallback to current directory if USB is unplugged
 
 def main():
-    parser = argparse.ArgumentParser(description='Capture and count insects using local Roboflow Docker server.')
+    parser = argparse.ArgumentParser(description='Capture and count insects using Roboflow Cloud API.')
 
     # Camera controls
     parser.add_argument('-f', '--focus', type=str, default=None, help='Manual lens position in diopters')
@@ -81,97 +71,55 @@ def main():
         sys.exit(1)
 
     # ==========================================
-    # 2. INFERENCE PHASE
+    # 2. INFERENCE PHASE (CLOUD API)
     # ==========================================
-    image = cv2.imread(filepath)
-    if image is None:
-        print(f"Error: Could not decode image -> {filepath}", file=sys.stderr)
+    if not os.path.exists(filepath):
+        print(f"Error: Image not found at -> {filepath}", file=sys.stderr)
         sys.exit(1)
 
-    print("Connecting to local Docker inference server (http://localhost:9001)...")
+    print("Sending image to Roboflow Cloud for inference...")
     
-    # Initialize the client pointed at your local container
+    # Configure client (api_key_transport="header" silences the SDK warning you saw)
     client = InferenceHTTPClient(
-        api_url="http://localhost:9001",
+        api_url="https://detect.roboflow.com",
         api_key=args.api_key
     ).configure(InferenceConfiguration(api_key_transport="header"))
 
-    def slice_callback(image_slice: np.ndarray) -> sv.Detections:
-        """Sends a sliced tile to the local inference server and parses the Workflow response."""
-        try:
-            # inference_sdk automatically encodes the numpy array slice to send to the local server
-            result = client.run_workflow(
-                workspace_name=WORKSPACE_NAME,
-                workflow_id=WORKFLOW_ID,
-                images={"image": image_slice},
-                use_cache=True
-            )
-            
-            # Workflow output structure is deeply nested. Extract the predictions array.
-            result_dict = result[0] if isinstance(result, list) else result
-            preds = []
-            
-            # Search the workflow block outputs for the predictions list
-            if "predictions" in result_dict:
-                preds = result_dict["predictions"]
-            else:
-                for val in result_dict.values():
-                    if isinstance(val, dict) and "predictions" in val:
-                        preds = val["predictions"]
-                        break
-                    elif isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict) and "x" in val[0]:
-                        preds = val
-                        break
+    try:
+        result = client.run_workflow(
+            workspace_name=WORKSPACE_NAME,
+            workflow_id=WORKFLOW_ID,
+            images={"image": filepath}
+        )
+    except Exception as e:
+        print(f"Cloud inference failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
-            # Convert JSON predictions back to Supervision Detections format
-            xyxy, confidence, class_id, class_name = [], [], [], []
-            for p in preds:
-                cx, cy, w, h = p['x'], p['y'], p['width'], p['height']
-                xyxy.append([cx - w/2, cy - h/2, cx + w/2, cy + h/2])
-                confidence.append(p.get('confidence', 1.0))
-                class_id.append(p.get('class_id', 0))
-                class_name.append(p.get('class', 'unknown'))
-
-            if not xyxy:
-                return sv.Detections.empty()
-
-            return sv.Detections(
-                xyxy=np.array(xyxy),
-                confidence=np.array(confidence),
-                class_id=np.array(class_id),
-                data={"class_name": np.array(class_name)}
-            )
-
-        except Exception as e:
-            print(f"Slice inference failed: {e}", file=sys.stderr)
-            return sv.Detections.empty()
-
-    print("Running 4x4 sliced inference...")
-    h, w = image.shape[:2]
-    slice_w = max(640, int(w / 4))
-    slice_h = max(640, int(h / 4))
-
-    slicer = sv.InferenceSlicer(
-        slice_wh=(slice_w, slice_h),
-        overlap_ratio_wh=(0.15, 0.15),
-        iou_threshold=0.5,
-        callback=slice_callback,
-    )
-
-    detections = slicer(image)
-    class_names = detections.data.get("class_name", [])
-    confidences = detections.confidence if detections.confidence is not None else []
-
+    # ==========================================
+    # 3. PARSE AND COUNT DETECTIONS
+    # ==========================================
     counts = Counter()
-    for name, conf in zip(class_names, confidences):
+    
+    # Extract the nested predictions array from the JSON response
+    try:
+        predictions = result[0]['predictions']['predictions']
+    except (IndexError, KeyError, TypeError):
+        print("Warning: Unexpected API response format or empty predictions.")
+        predictions = []
+
+    for p in predictions:
+        conf = p.get('confidence', 0)
+        name = p.get('class', 'unknown')
+
         if conf < args.conf:
             continue
         if not args.include_other and name == "other":
             continue
+            
         counts[name] += 1
 
     # ==========================================
-    # 3. OUTPUT SUMMARY
+    # 4. OUTPUT SUMMARY
     # ==========================================
     print("\n" + "=" * 32)
     print("      INSECT DETECTION SUMMARY  ")
